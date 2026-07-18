@@ -1,0 +1,29 @@
+# run artifacts — track reports/specs/metadata + eval stdout; exclude heavy or
+# non-portable / re-fetchable folders (cloned repo with nested .git, venv) and any
+# model weights.
+runs/**/repo/
+runs/**/env/
+runs/**/repo
+runs/**/env
+runs/**/*.safetensors
+runs/**/*.bin
+runs/**/*.pt
+runs/**/*.pth
+runs/**/*.gguf
+runs/**/*.onnx
+
+# logs: ignored globally, but keep the eval stdout captured under runs/
+*.log
+!runs/**/*.log
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# env
+.env
