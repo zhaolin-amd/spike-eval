@@ -44,18 +44,35 @@ def cli() -> None:
     """SpikeEval — validate a new-algorithm idea against a repo's own baseline, fast."""
 
 
+def _executors_for(family: str | None) -> Executors:
+    """Select the repo-family executors. None -> bare Executors (agentic stages are
+    scope-B stubs)."""
+    if family in (None, "", "none"):
+        return Executors()
+    if family == "gptq-opt":
+        from spike_eval.executors.gptq_opt import make_executors
+        return make_executors()
+    raise click.BadParameter(f"unknown --family: {family}")
+
+
 @cli.command()
 @click.argument("repo")
 @click.argument("idea")
 @click.option("--runs-dir", type=click.Path(), default=None,
               help="base dir for run directories (default: ./runs)")
-def run(repo: str, idea: str, runs_dir: str | None) -> None:
+@click.option("--family", default=None,
+              help="repo-family executors to wire (e.g. gptq-opt)")
+@click.option("--spec", "spec_path", type=click.Path(exists=True), default=None,
+              help="hand-authored idea_spec.yaml to seed (skips headless extraction)")
+def run(repo: str, idea: str, runs_dir: str | None, family: str | None,
+        spec_path: str | None) -> None:
     """Validate IDEA on REPO. REPO: path|github url. IDEA: text|file|arxiv id."""
     base = Path(runs_dir) if runs_dir else _default_runs_dir()
     base.mkdir(parents=True, exist_ok=True)
     res = run_pipeline(repo, idea, base, _timestamp(),
-                       ex=Executors(), approve_spec=_approve_spec,
-                       approve_plan=_approve_plan)
+                       ex=_executors_for(family), approve_spec=_approve_spec,
+                       approve_plan=_approve_plan,
+                       spec_path=Path(spec_path) if spec_path else None)
     _report_result(res)
 
 

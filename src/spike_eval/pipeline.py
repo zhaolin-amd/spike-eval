@@ -73,6 +73,7 @@ def run_pipeline(
     ex: Executors,
     approve_spec: Callable[[IdeaSpec], bool],
     approve_plan: Callable,
+    spec_path: Optional[Path] = None,
 ) -> PipelineResult:
     # --- ingest ---
     info = ingest_mod.classify(repo_arg, idea_arg)
@@ -83,6 +84,10 @@ def run_pipeline(
     ex.fetch(info, rd.repo_dir)
     (rd.root / "ingest.json").write_text(json.dumps(asdict(info), indent=2))
     rd.write_idea(ingest_mod.read_idea_text(info, ex.fetch_arxiv))
+    # A hand-authored spec (demo / no headless extractor) is seeded here so `extract_spec`
+    # loads it and gate 1 still applies.
+    if spec_path is not None:
+        (rd.root / "idea_spec.yaml").write_text(Path(spec_path).read_text())
 
     # --- ideaspec + gate 1 ---
     spec = extract_spec(rd, ex.spec_extractor)

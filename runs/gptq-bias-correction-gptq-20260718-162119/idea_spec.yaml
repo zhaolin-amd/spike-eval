@@ -1,0 +1,61 @@
+idea_name: GPTQ bias-correction
+target_repo: https://github.com/IST-DASLab/gptq
+summary: 'After GPTQ quantizes each OPT decoder block, measure each Linear''s mean
+  output error on the calibration inputs and fold alpha * error into its bias (a compensation
+  term on top of GPTQ''s existing Hessian error-feedback). The knob is --bc-alpha;
+  alpha=0 reduces exactly to vanilla GPTQ.
+
+  '
+wins_on: accuracy
+extension_point:
+  file: opt.py
+  symbol: opt_sequential
+  kind: hook
+  description: 'Per-block post-quantization bias correction via forward hooks; adds
+    a --bc-alpha arg. Low blast radius — vanilla GPTQ path is untouched when alpha=0.
+
+    '
+baseline:
+  method: GPTQ
+  command: python opt.py {model} wikitext2 --wbits 4
+  sane_low: 20.0
+  sane_high: 45.0
+claim:
+  id: gptq-bc-opt125m-w4-wikitext2
+  statement: 'On facebook/opt-125m at W4 (per-channel, groupsize -1), GPTQ + bias-correction
+    lowers WikiText2 perplexity vs vanilla GPTQ by at least min_delta, same calibration/seqlen.
+
+    '
+  protocol:
+    command: python opt.py {model} wikitext2 --wbits 4 --bc-alpha {alpha}
+    metric: perplexity
+    lower_is_better: true
+    dataset: wikitext2
+    split: null
+    seqlen: 2048
+    few_shot: 0
+    extra_args: null
+  min_delta: 0.05
+  tolerance: 0.02
+ablations: []
+correctness:
+- kind: degenerate_equivalence
+  description: alpha=0 must reproduce pristine GPTQ WikiText2 ppl (bit-identical path).
+  degenerate_params:
+    bc_alpha: 0
+  closed_form_ref: null
+ladder:
+- name: L2_tiny
+  model: facebook/opt-125m
+  protocol:
+    command: python opt.py {model} wikitext2 --wbits 4 --bc-alpha {alpha}
+    metric: perplexity
+    lower_is_better: true
+    dataset: wikitext2
+    split: null
+    seqlen: 2048
+    few_shot: 0
+    extra_args: null
+  budget_gpu_hours: 0.05
+  est_cost_usd: 0.0
+  pass_margin: null

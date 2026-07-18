@@ -1,0 +1,215 @@
+"""GPTQ (IST-DASLab/gptq) OPT-family executors for SpikeEval.
+
+The concrete injected callables for the bias-correction demo (design §8): patch the cloned
+repo with the compensation term, run `opt.py`, and parse WikiText2 perplexity. Each unique
+(model, alpha) run is cached under the run dir, so a full pipeline does only three real GPU
+runs: pristine (baseline probe) / alpha=0 (degenerate check + ladder baseline) / alpha=X
+(ladder idea).
+
+Env knobs: SPIKE_EVAL_BC_ALPHA (idea strength, default 1.0), SPIKE_EVAL_GPTQ_WBITS (4),
+SPIKE_EVAL_GPTQ_CALIB (wikitext2), SPIKE_EVAL_PYTHON (interpreter; default the current one,
+which is verified to run opt.py on this node).
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+from spike_eval import gpu, modelpaths
+from spike_eval.correctness import CheckResult
+from spike_eval.implement import ImplementResult
+from spike_eval.models import (
+    Baseline, CorrectnessCheck, EvalProtocol, IdeaSpec, LadderTier, Measurement,
+)
+from spike_eval.pipeline import Executors
+from spike_eval.rundir import RunDir
+
+ASSET_PATCH = Path(__file__).resolve().parent.parent / "assets" / "gptq_bias_correction.patch"
+GITHUB_URL = "https://github.com/IST-DASLab/gptq"
+
+DEMO_ALPHA = float(os.environ.get("SPIKE_EVAL_BC_ALPHA", "1.0"))
+WBITS = int(os.environ.get("SPIKE_EVAL_GPTQ_WBITS", "4"))
+CALIB = os.environ.get("SPIKE_EVAL_GPTQ_CALIB", "wikitext2")
+INTERP = os.environ.get("SPIKE_EVAL_PYTHON", sys.executable)
+EVAL_DATASET = "wikitext2"
+DEGENERATE_EPS = 1e-3          # alpha=0 must reproduce pristine ppl to within this
+
+_DATASET_MARKERS = {"wikitext2", "ptb", "c4", "ptb-new", "c4-new"}
+
+
+# --- stdout parsing (pure, offline-testable) -------------------------------
+
+
+def parse_ppl(stdout: str, dataset: str = EVAL_DATASET) -> Optional[float]:
+    """Extract a dataset's perplexity from opt.py stdout. Layout per section:
+    `<dataset>` / `Evaluating ...` / integer layer indices / `<ppl float>`. The float
+    BEFORE the marker (quantization time) is ignored by keying off the marker."""
+    lines = stdout.splitlines()
+    for idx, line in enumerate(lines):
+        if line.strip() == dataset:
+            for nxt in lines[idx + 1:]:
+                s = nxt.strip()
+                if s == "Evaluating ..." or s.isdigit() or not s:
+                    continue
+                if s in _DATASET_MARKERS:
+                    return None
+                try:
+                    return float(s)
+                except ValueError:
+                    continue
+    return None
+
+
+# --- run cache -------------------------------------------------------------
+
+
+def _cache_key(model: str, alpha: Optional[float]) -> str:
+    m = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")[-24:]
+    a = "pristine" if alpha is None else f"a{alpha}"
+    return f"{m}_{a}"
+
+
+def _measure(rd: RunDir, model: str, alpha: Optional[float], *, timeout: float = 1800
+             ) -> Optional[float]:
+    """Run opt.py once for (model, alpha) with streaming early-termination after the
+    WikiText2 ppl is captured; cache the result. alpha=None -> pristine (no --bc-alpha)."""
+    key = _cache_key(model, alpha)
+    cache = rd.ladder_dir / f"{key}.json"
+    if cache.exists():
+        return json.loads(cache.read_text()).get("ppl")
+
+    resolved = modelpaths.resolve_model(model)
+    visible = gpu.cuda_visible(1) or "0"
+    cmd = [INTERP, "opt.py", resolved, CALIB, "--wbits", str(WBITS)]
+    if alpha is not None:
+        cmd += ["--bc-alpha", str(alpha)]
+    env = {**os.environ, "CUDA_VISIBLE_DEVICES": visible, **modelpaths.hf_env_overlay()}
+
+    log = rd.ladder_dir / f"{key}.log"
+    ppl = _stream_run(cmd, rd.repo_dir, env, log, timeout=timeout)
+    cache.write_text(json.dumps({"model": model, "alpha": alpha, "ppl": ppl,
+                                 "cuda_visible": visible}))
+    return ppl
+
+
+def _stream_run(cmd: list[str], cwd: Path, env: dict, log: Path, *, timeout: float
+                ) -> Optional[float]:
+    """Stream opt.py stdout to `log`, capture the WikiText2 ppl, and kill the process
+    (and its group) as soon as it appears — avoiding the later ptb/c4 eval (which needs
+    dataset scripts unsupported by datasets>=4)."""
+    seen_marker = False
+    ppl: Optional[float] = None
+    with open(log, "w") as lf:
+        proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, text=True, bufsize=1,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+        try:
+            for line in proc.stdout:               # type: ignore[union-attr]
+                lf.write(line)
+                lf.flush()
+                s = line.strip()
+                if s == EVAL_DATASET:
+                    seen_marker = True
+                    continue
+                if seen_marker:
+                    if s == "Evaluating ..." or s.isdigit() or not s:
+                        continue
+                    try:
+                        ppl = float(s)
+                        break
+                    except ValueError:
+                        continue
+        finally:
+            _reap(proc)
+    return ppl
+
+
+def _reap(proc: subprocess.Popen) -> None:
+    """Terminate the process group started with start_new_session and wait."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+# --- injected executors ----------------------------------------------------
+
+
+def baseline_executor(rd: RunDir, baseline: Baseline, protocol: EvalProtocol,
+                      model: str) -> Measurement:
+    """Infra-sanity probe: pristine (unpatched) GPTQ on the cheapest tier's model. Runs
+    BEFORE implement patches the repo (pipeline order), so no --bc-alpha flag exists yet."""
+    ppl = _measure(rd, model, alpha=None)
+    return Measurement(tier="L2_tiny", variant="baseline", metric="perplexity",
+                       value=ppl, ok=ppl is not None,
+                       log_path=str(rd.ladder_dir / f"{_cache_key(model, None)}.log"))
+
+
+def implementer(rd: RunDir, spec: IdeaSpec) -> ImplementResult:
+    """Apply the hand-written bias-correction patch to the cloned repo (isolated copy)."""
+    if not ASSET_PATCH.is_file():
+        return ImplementResult(ok=False, notes=f"patch asset missing: {ASSET_PATCH}")
+    patch_copy = rd.impl_dir / "idea.patch"
+    patch_copy.write_text(ASSET_PATCH.read_text())
+    proc = subprocess.run(["git", "apply", str(ASSET_PATCH)], cwd=str(rd.repo_dir),
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return ImplementResult(ok=False, patch_path=str(patch_copy),
+                               notes=f"git apply failed: {proc.stderr.strip()}")
+    return ImplementResult(ok=True, patch_path=str(patch_copy),
+                           files_touched=["opt.py"],
+                           notes="bias-correction (--bc-alpha) grafted into opt_sequential")
+
+
+def check_runner(rd: RunDir, check: CorrectnessCheck) -> CheckResult:
+    """Degenerate-equivalence: patched repo with --bc-alpha 0 must reproduce the pristine
+    WikiText2 ppl to within DEGENERATE_EPS. Other check kinds are not implemented here."""
+    if check.kind != "degenerate_equivalence":
+        return CheckResult(kind=check.kind, passed=False,
+                           detail="unsupported check kind for gptq_opt")
+    spec = rd.read_spec()
+    model = spec.ladder[0].model if (spec and spec.ladder) else "facebook/opt-125m"
+    pristine = _measure(rd, model, alpha=None)
+    deg = _measure(rd, model, alpha=0.0)
+    if pristine is None or deg is None:
+        return CheckResult(kind=check.kind, passed=False, detail="a run produced no ppl")
+    ok = abs(pristine - deg) <= DEGENERATE_EPS
+    return CheckResult(kind=check.kind, passed=ok,
+                       detail=f"pristine={pristine:.6f} alpha0={deg:.6f} "
+                              f"|Δ|={abs(pristine - deg):.2e} eps={DEGENERATE_EPS:g}")
+
+
+def tier_executor(rd: RunDir, tier: LadderTier, variant: str) -> Measurement:
+    """Ladder measurement: baseline variant -> alpha 0 (== pristine by the degenerate
+    gate); idea variant -> alpha DEMO_ALPHA."""
+    alpha = 0.0 if variant == "baseline" else DEMO_ALPHA
+    ppl = _measure(rd, tier.model, alpha=alpha)
+    return Measurement(tier=tier.name, variant=variant, metric="perplexity",
+                       value=ppl, ok=ppl is not None,
+                       log_path=str(rd.ladder_dir / f"{_cache_key(tier.model, alpha)}.log"))
+
+
+def make_executors() -> Executors:
+    """Executors wired for the gptq-opt family. `fetch` uses the default git clone; the
+    idea-spec is expected to already be on disk (hand-authored for the demo), so no
+    spec_extractor is wired."""
+    return Executors(
+        baseline=baseline_executor,
+        implementer=implementer,
+        check_runner=check_runner,
+        tier=tier_executor,
+        ablation=None,
+    )
