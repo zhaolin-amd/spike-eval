@@ -56,9 +56,36 @@ def test_ladder_fails_fast(tmp_path):
 
 
 def test_ladder_skips_expensive_without_approval(tmp_path):
+    # No approver injected -> expensive tiers are denied by default.
     tiers = [LadderTier(name="L3_small", model="llama-7b", protocol=_proto(),
                         budget_gpu_hours=2.0)]
     spec = _spec(tiers)
-    res = run_ladder(_rd(tmp_path), spec, _exec({}), allow_expensive=False)
+    res = run_ladder(_rd(tmp_path), spec, _exec({}), approve_expensive=None)
     assert res.skipped_expensive == ["L3_small"]
     assert res.outcomes == []
+
+
+def test_ladder_runs_cheap_then_stops_at_declined_expensive(tmp_path):
+    # L1 (cheap) runs; the first expensive tier is surfaced and declined -> stop with the
+    # cheap-tier evidence, NOT an abort.
+    tiers = [LadderTier(name="L1_proxy", model="random", protocol=_proto()),
+             LadderTier(name="L3_small", model="llama-7b", protocol=_proto(),
+                        budget_gpu_hours=2.0)]
+    spec = _spec(tiers)
+    vals = {("L1_proxy", "baseline"): 10.0, ("L1_proxy", "idea"): 9.8}
+    res = run_ladder(_rd(tmp_path), spec, _exec(vals), approve_expensive=lambda t: False)
+    assert [o.tier for o in res.outcomes] == ["L1_proxy"]
+    assert res.deciding_tier == "L1_proxy"
+    assert res.skipped_expensive == ["L3_small"]
+
+
+def test_ladder_runs_expensive_when_approved(tmp_path):
+    tiers = [LadderTier(name="L1_proxy", model="random", protocol=_proto()),
+             LadderTier(name="L3_small", model="llama-7b", protocol=_proto(),
+                        budget_gpu_hours=2.0)]
+    spec = _spec(tiers)
+    vals = {("L1_proxy", "baseline"): 10.0, ("L1_proxy", "idea"): 9.8,
+            ("L3_small", "baseline"): 8.0, ("L3_small", "idea"): 7.8}
+    res = run_ladder(_rd(tmp_path), spec, _exec(vals), approve_expensive=lambda t: True)
+    assert [o.tier for o in res.outcomes] == ["L1_proxy", "L3_small"]
+    assert res.skipped_expensive == []

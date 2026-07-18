@@ -1,9 +1,10 @@
 """validate — the cost ladder (design §6).
 
 Real control flow: walk tiers cheapest-first, measure baseline + idea at each, stop as
-soon as a tier fails the pass margin (fail fast). Expensive tiers are only entered when
-`allow_expensive` is set (the pipeline sets it from gate 2). The per-tier measurement is
-an injected callable.
+soon as a tier fails the pass margin (fail fast). Cheap tiers run automatically; the
+first EXPENSIVE tier is surfaced via the injected `approve_expensive` callback (gate 2),
+and declining it stops the ladder with whatever cheap-tier evidence was gathered — it is
+NOT an all-or-nothing abort. The per-tier measurement is an injected callable.
 """
 from __future__ import annotations
 
@@ -16,6 +17,11 @@ from spike_eval.rundir import RunDir
 # Executor contract: measure one variant ("baseline" | "idea") at one tier, returning a
 # Measurement. Injected so the ladder is offline-testable.
 TierExecutor = Callable[[RunDir, LadderTier, str], Measurement]
+
+# Gate-2 contract: called once, before the first expensive tier, with that tier; returns
+# True to run the expensive tier(s), False to stop with the cheap-tier results. None (not
+# injected) denies expensive tiers by default.
+ExpensiveApprover = Callable[[LadderTier], bool]
 
 
 @dataclass
@@ -48,17 +54,26 @@ def _cleared(baseline: Measurement, idea: Measurement, lower_is_better: bool,
 
 
 def run_ladder(rd: RunDir, spec: IdeaSpec, executor: Optional[TierExecutor],
-               *, allow_expensive: bool = False) -> LadderResult:
-    """Walk the ladder, fail fast, respect the expensive-tier gate."""
+               *, approve_expensive: Optional[ExpensiveApprover] = None) -> LadderResult:
+    """Walk the ladder, fail fast, and surface the first expensive tier via
+    `approve_expensive` (gate 2). Declining stops the ladder with the cheap-tier
+    evidence gathered so far rather than aborting the whole run."""
     if executor is None and spec.ladder:
         raise NotImplementedError("tier executor not wired (scope B)")
     res = LadderResult()
     lib = spec.claim.protocol.lower_is_better
-    for tier in spec.ladder:
-        if tier.is_expensive and not allow_expensive:
-            res.skipped_expensive.append(tier.name)
-            res.stopped_early = True
-            break
+    expensive_decision: Optional[bool] = None   # None -> not yet asked
+    for idx, tier in enumerate(spec.ladder):
+        if tier.is_expensive:
+            if approve_expensive is None:
+                expensive_decision = False
+            elif expensive_decision is None:
+                expensive_decision = bool(approve_expensive(tier))
+            if not expensive_decision:
+                res.skipped_expensive = [t.name for t in spec.ladder[idx:]
+                                         if t.is_expensive]
+                res.stopped_early = True
+                break
         base_m = executor(rd, tier, "baseline")
         idea_m = executor(rd, tier, "idea")
         cleared = _cleared(base_m, idea_m, lib, _margin(tier, spec.claim))

@@ -6,7 +6,8 @@ paper_reprise.pipeline).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -46,6 +47,14 @@ class Executors:
     ablation: Optional[Callable] = None
 
 
+def _blocked(spec: IdeaSpec, reason: str) -> Grade:
+    """A BLOCKED verdict for a structural precondition (e.g. no ladder), independent of
+    correctness / infra checks."""
+    return Grade(claim_id=spec.claim.id, verdict="BLOCKED",
+                 metric=spec.claim.protocol.metric,
+                 lower_is_better=spec.claim.protocol.lower_is_better, reason=reason)
+
+
 def _finish_with_grade(rd: RunDir, spec: IdeaSpec, grade: Grade) -> PipelineResult:
     rd.write_grade(grade)
     analysis, en, zh = render_reports(spec, grade)
@@ -67,10 +76,12 @@ def run_pipeline(
 ) -> PipelineResult:
     # --- ingest ---
     info = ingest_mod.classify(repo_arg, idea_arg)
-    idea_name = f"idea-{timestamp}"  # refined once the spec is known (dir already stamped)
-    rd = RunDir.create(base_dir, idea_name=idea_name, repo_name=Path(repo_arg).name or "repo",
-                       timestamp=timestamp)
+    # Slug the run dir from the idea itself (text head / file stem / arxiv id), known at
+    # ingest — the spec's refined idea_name is not available until after gate 1.
+    rd = RunDir.create(base_dir, idea_name=ingest_mod.idea_slug_source(info),
+                       repo_name=Path(repo_arg).name or "repo", timestamp=timestamp)
     ex.fetch(info, rd.repo_dir)
+    (rd.root / "ingest.json").write_text(json.dumps(asdict(info), indent=2))
     rd.write_idea(ingest_mod.read_idea_text(info, ex.fetch_arxiv))
 
     # --- ideaspec + gate 1 ---
@@ -87,16 +98,21 @@ def run_pipeline(
 
 def _finish_pipeline(rd: RunDir, spec: IdeaSpec, *, ex: Executors,
                      approve_plan: Callable) -> PipelineResult:
-    # --- plan + gate 2 (surface scale) ---
+    # --- plan (record scale; gate 2 is surfaced lazily inside validate) ---
     plan = build_plan(spec)
     (rd.root / "plan.json").write_text(plan.model_dump_json(indent=2))
-    if plan.needs_user_decision and not approve_plan(plan):
-        return PipelineResult(root=rd.root, aborted_at="plan")
 
-    # --- baseline (first) + infra sanity ---
-    first_model = spec.ladder[0].model if spec.ladder else spec.baseline.method
+    # A spec with no ladder has nothing to validate -> BLOCKED, not a silent pass.
+    if not spec.ladder:
+        return _finish_with_grade(rd, spec, _blocked(
+            spec, "no ladder tiers defined — nothing to validate"))
+
+    # --- baseline (first): infra-sanity probe on the cheapest tier's model.
+    # NB: this is the eval-infra probe only; the ladder re-measures baseline per tier for
+    # the fair per-tier comparison (design §5). ---
+    probe_model = spec.ladder[0].model
     base_probe: Measurement = run_baseline(rd, spec.baseline, spec.claim.protocol,
-                                           first_model, ex.baseline)
+                                           probe_model, ex.baseline)
     sane = infra_ok(base_probe, spec.baseline)
 
     # --- implement ---
@@ -104,7 +120,7 @@ def _finish_pipeline(rd: RunDir, spec: IdeaSpec, *, ex: Executors,
     if not impl.ok:
         return PipelineResult(root=rd.root, aborted_at="implement")
 
-    # --- correctness HARD GATE (before any eval) ---
+    # --- correctness HARD GATE (before any eval); zero checks does NOT clear it ---
     checks = run_correctness(rd, spec, ex.check_runner)
     correctness_ok = gate_passed(checks)
     if not correctness_ok:
@@ -112,10 +128,9 @@ def _finish_pipeline(rd: RunDir, spec: IdeaSpec, *, ex: Executors,
                            infra_ok=sane)
         return _finish_with_grade(rd, spec, grade)
 
-    # --- validate: cost ladder ---
-    # Reaching here means gate 2 was cleared: either no expensive tier exists, or the
-    # user approved the surfaced scale above. So expensive tiers may now run.
-    ladder = run_ladder(rd, spec, ex.tier, allow_expensive=True)
+    # --- validate: cost ladder; cheap tiers run, the first expensive tier is surfaced ---
+    ladder = run_ladder(rd, spec, ex.tier,
+                        approve_expensive=lambda tier: approve_plan(plan))
 
     deciding = ladder.outcomes[-1] if ladder.outcomes else None
     base_m = deciding.baseline if deciding else base_probe
@@ -129,9 +144,12 @@ def _finish_pipeline(rd: RunDir, spec: IdeaSpec, *, ex: Executors,
 
     # --- grade (pure code) ---
     grade = grade_idea(spec.claim, base_m, idea_m, correctness_ok=correctness_ok,
-                       infra_ok=sane,
-                       deciding_tier=ladder.deciding_tier)
-    return _finish_with_grade(rd, spec, grade)
+                       infra_ok=sane, deciding_tier=ladder.deciding_tier)
+    notes = ([f"skipped expensive tiers (not approved): {ladder.skipped_expensive}"]
+             if ladder.skipped_expensive else [])
+    res = _finish_with_grade(rd, spec, grade)
+    res.notes = notes
+    return res
 
 
 def resume_pipeline(run_dir: Path, *, ex: Executors, approve_plan: Callable

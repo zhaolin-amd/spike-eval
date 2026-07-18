@@ -78,6 +78,16 @@ def default_fetch(info: IngestInfo, repo_dir: Path) -> None:
                        check=True)
 
 
+def idea_slug_source(info: IngestInfo) -> str:
+    """A human-ish string to slug the run dir from, known at ingest (before the spec):
+    arxiv id, file stem, or the head of the free-text idea."""
+    if info.idea_kind == "arxiv":
+        return info.arxiv_id or "arxiv"
+    if info.idea_kind == "file":
+        return Path(info.idea_source).expanduser().stem
+    return info.idea_source          # free text; RunDir.slug truncates + sanitizes
+
+
 def read_idea_text(info: IngestInfo, fetch_arxiv: Optional[Callable] = None) -> str:
     """Resolve the idea to its raw text. 'text' -> itself ; 'file' -> file contents ;
     'arxiv' -> delegated to fetch_arxiv (injected; None -> a placeholder pointer)."""

@@ -91,6 +91,8 @@ def _report_result(res) -> None:
         return
     g = res.grade
     click.echo(f"\nverdict: {g.verdict} — {g.reason}" if g else "\n(no grade)")
+    for note in res.notes:
+        click.echo(f"note: {note}")
     click.echo(f"run dir: {res.root}")
 
 

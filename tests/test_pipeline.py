@@ -64,6 +64,9 @@ def test_pipeline_win(tmp_path):
     assert (res.root / "README_zh.md").exists()
     assert (res.root / "analysis.md").exists()
     assert (res.root / "idea_spec.yaml").exists()
+    assert (res.root / "ingest.json").exists()
+    # run dir slug derives from the idea text, not a placeholder
+    assert res.root.name.startswith("add-a-compensation-term")
 
 
 def test_pipeline_correctness_hard_gate_blocks(tmp_path):
@@ -91,3 +94,29 @@ def test_pipeline_infra_unsane_blocks(tmp_path):
                        ex=ex, approve_spec=lambda s: True, approve_plan=lambda p: True)
     assert res.grade.verdict == "BLOCKED"
     assert "infra" in res.grade.reason
+
+
+def test_pipeline_declined_expensive_grades_on_cheap_tier(tmp_path):
+    # L1 (cheap) clears the margin, then L3 (expensive) is surfaced and declined: the run
+    # is graded on the cheap-tier evidence (not aborted), and the skip is surfaced.
+    spec = _spec(tiers=[
+        LadderTier(name="L1_proxy", model="random", protocol=_proto()),
+        LadderTier(name="L3_small", model="llama-7b", protocol=_proto(),
+                   budget_gpu_hours=2.0),
+    ])
+    ex = _executors(spec, baseline_val=10.0, idea_val=9.8)
+    res = run_pipeline("/tmp/gptq", "idea", tmp_path, "20260718-000004",
+                       ex=ex, approve_spec=lambda s: True, approve_plan=lambda p: False)
+    assert res.aborted_at is None
+    assert res.grade.verdict == "WIN"
+    assert res.grade.deciding_tier == "L1_proxy"
+    assert any("L3_small" in n for n in res.notes)
+
+
+def test_pipeline_no_ladder_blocks(tmp_path):
+    spec = _spec(tiers=[])
+    ex = _executors(spec, baseline_val=10.0, idea_val=9.8)
+    res = run_pipeline("/tmp/gptq", "idea", tmp_path, "20260718-000005",
+                       ex=ex, approve_spec=lambda s: True, approve_plan=lambda p: True)
+    assert res.grade.verdict == "BLOCKED"
+    assert "ladder" in res.grade.reason

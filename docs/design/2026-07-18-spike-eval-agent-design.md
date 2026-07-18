@@ -15,6 +15,9 @@ baseline** — reporting an honest go / no-go with the evidence.
 
 - The idea can be handed in three ways, auto-detected by `ingest`: **free-text**, a
   **written idea-spec file** (md/yaml), or an **arxiv id/url** describing the improvement.
+  An arxiv idea contributes only its *method*, grafted onto the target repo and judged
+  against **that repo's measured baseline** — never the paper's reported number (that is
+  paper-reprise's job); the boundary keeps the two tools distinct.
 - The target repo can be a **local path** or a **GitHub url** (cloned into the run dir).
 
 ### 1.1 Core Insight
@@ -71,22 +74,26 @@ spike-eval report <run_dir>      # re-render the report from persisted state
 ### 2.1 Stages (map to `src/spike_eval/*.py`)
 
 ```
-ingest        normalize (repo, idea) -> clone/copy repo/, capture idea.md ; detect input kind
+ingest        normalize (repo, idea) -> clone/copy repo/, write ingest.json + idea.md ;
+              detect input kind ; slug the run dir from the idea (text head/stem/arxiv id)
 ideaspec      headless Claude: idea + repo -> IdeaSpec (falsifiable claim, extension point,
               ablations, correctness checks, ladder tiers)          [GATE 1: approve spec]
-plan          feasibility + COST LADDER plan + SURFACE SCALE        [GATE 2: approve plan]
-baseline      run the repo's ORIGINAL algorithm -> measured baseline (+ infra sanity)
+plan          feasibility + COST LADDER plan ; record surfaced scale to plan.json
+baseline      run the repo's ORIGINAL algorithm once -> infra-sanity probe on the cheapest
+              tier's model (the ladder re-measures baseline per tier for the fair compare)
 implement     headless Claude: surgical diff at extension point (isolated copy) -> impl patch
 correctness   HARD GATE: unit / closed-form / degenerate-equivalence  (before any eval)
-validate      cost ladder: L1 proxy -> [surface] -> L2 tiny -> L3 small ; per-tier pass band
+validate      cost ladder: L1 proxy -> L2 tiny -> [GATE 2 at first expensive tier] ->
+              L3 small ; fail fast on the pass margin
 ablate        baseline / +idea / per-subcomponent -> attribution
 grade         pure code, isolated: WIN / NEUTRAL / LOSE / BLOCKED  (go / no-go)
 report        analysis.md + bilingual README ; infra checklist ; failure attribution
 ```
 
-Two gates only (idea-spec, plan) plus the internal correctness hard-gate. `baseline`,
-`implement`, `correctness`, `validate`, `ablate` side effects are **injected callables**,
-so the whole pipeline is testable offline with fakes (as in paper-reprise).
+Two user gates (idea-spec at gate 1; the scale at gate 2, surfaced lazily just before the
+first expensive tier) plus the internal correctness hard-gate. `baseline`, `implement`,
+`correctness`, `validate`, `ablate` side effects are **injected callables**, so the whole
+pipeline is testable offline with fakes (as in paper-reprise).
 
 ## 3. Run directory layout
 
@@ -118,13 +125,17 @@ that run touched.
 
 - `ExtensionPoint` — file, symbol, kind (`subclass|register|hook|core-edit`); prefer
   low-blast-radius kinds so the baseline stays untouched and the diff is reversible.
-- `Claim` — falsifiable: `metric`, `lower_is_better`, `dataset/protocol`, `min_delta`
-  (the smallest change that counts as a real win), `tolerance` (noise band).
+- `Claim` — falsifiable: an `EvalProtocol` (which carries `metric`, `lower_is_better`,
+  `dataset`, …), plus `min_delta` (the smallest change that counts as a real win) and
+  `tolerance` (noise band). `min_delta` and `tolerance` are independent knobs, so the
+  NEUTRAL dead-zone `[-tolerance, min_delta)` need not be symmetric.
 - `CorrectnessCheck` — `kind` (`unit|closed_form|degenerate_equivalence`),
   `degenerate_params` (settings under which the idea must reduce to the original), and an
-  optional independent closed-form reference to cross-check against.
-- `LadderTier` — `name` (`L1_proxy|L2_tiny|L3_small`), `model`, `metric`, `budget`,
-  `pass_band`; `is_expensive` flags tiers that must be surfaced before running.
+  optional independent `closed_form_ref` to cross-check against.
+- `LadderTier` — `name` (`L1_proxy|L2_tiny|L3_small|L4_full`), `model`, an `EvalProtocol`,
+  `budget_gpu_hours` + `est_cost_usd`, and `pass_margin` (defaults to the claim's
+  `min_delta`); `is_expensive` (name in {L3,L4} or budget ≥ 1 GPU-h) flags tiers that must
+  be surfaced before running.
 - `Baseline` — how to run the repo's original algorithm; its measured number is the grade
   reference and the infra-sanity probe.
 - `IdeaSpec` — the whole thing: idea name, target repo, hypothesis (wins on
@@ -137,8 +148,10 @@ that run touched.
 
 A claim is graded **only** on measured numbers already on disk:
 
-1. `BLOCKED` if correctness gate failed, the deciding tier did not run, or infra sanity
-   failed (baseline out of its expected band → suspect the eval protocol, not the idea).
+1. `BLOCKED` if correctness gate failed (incl. **zero checks declared**), infra sanity
+   failed (baseline out of band → suspect the eval protocol, not the idea), no ladder tier
+   was defined, or no tier produced a comparable measurement (e.g. the only tiers were
+   expensive and declined at gate 2).
 2. Else compare idea vs measured baseline in the claim's direction:
    - `WIN`   — improves by ≥ `min_delta`.
    - `LOSE`  — regresses beyond `tolerance`.
@@ -157,19 +170,25 @@ Ladder tiers, cheapest first; each kills a class of bad idea before the next spe
 | L1 proxy | one layer / small random tensors: reconstruction MSE, quant error | wrong-direction ideas |
 | L2 tiny | 125M–1.3B: ppl on a small corpus | not-accurate-enough ideas |
 | L3 small | 7B: ppl + 1–2 tasks | doesn't-scale ideas |
+| L4 full | target model: full eval | (final headline number) |
 
-`plan` computes the ladder and **surfaces the scale** (per-tier model, config count, est.
-GPU-hours, est. cost) at gate 2; any `is_expensive` tier requires explicit approval before
-`validate` runs it. This encodes the "surface scale before large runs" and "no default
-`--yes`" principles.
+`plan` computes the ladder and records the **scale** (per-tier model, est. GPU-hours, est.
+cost) to `plan.json`. The ladder runs cheap tiers automatically and **surfaces the scale at
+gate 2 only when it reaches the first `is_expensive` tier** — declining does NOT abort the
+run; it stops with the cheap-tier evidence already gathered and reports the skipped tiers.
+This encodes "surface scale before large runs", "no default `--yes`", and "cheap signals
+first" together.
 
 ## 7. Autonomy & guardrails
 
 - **Gate 1** — after `ideaspec`: user reviews/edits `idea_spec.yaml` (claim, extension
   point, ladder) and approves. Resuming from a run dir *is* the approval.
-- **Gate 2** — after `plan`: user approves the surfaced scale.
+- **Gate 2** — surfaced lazily, just before the first expensive tier: user approves the
+  scale. Declining stops the ladder and grades on the cheap-tier evidence (not an abort).
 - **Correctness hard-gate** — internal, non-skippable; green tests+lint never substitute
-  for the degenerate-equivalence / closed-form check.
+  for the degenerate-equivalence / closed-form check. An idea that declares **no**
+  correctness check does NOT clear the gate (→ BLOCKED); at least one is required to enter
+  eval.
 - Per-tier budgets & timeouts; isolated run dir; deterministic seeds where possible.
 
 ## 8. Scope B (next, not this turn)
