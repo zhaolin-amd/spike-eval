@@ -1,14 +1,17 @@
 """Offline tests for the gptq-opt executor's pure helpers (no GPU / no subprocess)."""
-from spike_eval.executors.gptq_opt import _cache_key, parse_ppl
+from spike_eval.executors.gptq_opt import _cache_key, parse_layer_mse, parse_ppl
 
 # Captured shape of IST-DASLab/gptq opt.py stdout: quantization time float appears BEFORE
-# the 'wikitext2' marker, then the eval section ends in the ppl float.
+# the 'wikitext2' marker, then the eval section ends in the ppl float. LAYER_MSE lines are
+# printed during quantization (before the eval section).
 SAMPLE = """Starting ...
 Ready.
 0 self_attn.k_proj
 Quantizing ...
+LAYER_MSE 0 0.010000
 11 fc2
 Quantizing ...
+LAYER_MSE 11 0.030000
 20.090407371520996
 wikitext2
 Evaluating ...
@@ -38,6 +41,15 @@ def test_parse_ppl_missing_dataset():
 
 def test_parse_ppl_empty():
     assert parse_ppl("", "wikitext2") is None
+
+
+def test_parse_layer_mse_mean():
+    # mean of 0.01 and 0.03
+    assert parse_layer_mse(SAMPLE) == 0.02
+
+
+def test_parse_layer_mse_missing():
+    assert parse_layer_mse("no mse lines here") is None
 
 
 def test_cache_key_distinguishes_alpha():

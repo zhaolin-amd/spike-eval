@@ -2,6 +2,14 @@
   "idea_name": "GPTQ bias-correction",
   "tiers": [
     {
+      "name": "L1_proxy",
+      "model": "facebook/opt-125m",
+      "metric": "layer_mse",
+      "budget_gpu_hours": 0.02,
+      "est_cost_usd": 0.0,
+      "is_expensive": false
+    },
+    {
       "name": "L2_tiny",
       "model": "facebook/opt-125m",
       "metric": "perplexity",
@@ -10,7 +18,7 @@
       "is_expensive": false
     }
   ],
-  "total_gpu_hours": 0.05,
+  "total_gpu_hours": 0.07,
   "total_cost_usd": 0.0,
   "biggest_model": "facebook/opt-125m",
   "needs_user_decision": false,

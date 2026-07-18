@@ -1,5 +1,5 @@
 diff --git a/opt.py b/opt.py
-index ae26975..c865306 100644
+index ae26975..2a2c839 100644
 --- a/opt.py
 +++ b/opt.py
 @@ -86,9 +86,19 @@ def opt_sequential(model, dataloader, dev):
@@ -22,7 +22,7 @@ index ae26975..c865306 100644
              return tmp
          handles = []
          for name in subset:
-@@ -106,6 +116,32 @@ def opt_sequential(model, dataloader, dev):
+@@ -106,8 +116,41 @@ def opt_sequential(model, dataloader, dev):
              )
              quantizers['model.decoder.layers.%d.%s' % (i, name)] = gptq[name].quantizer
              gptq[name].free()
@@ -52,10 +52,19 @@ index ae26975..c865306 100644
 +                        args.bc_alpha * corr).to(subset[name].bias.dtype)
 +            print('BC applied layer', i, 'alpha', args.bc_alpha)
 +
++        # SpikeEval L1 proxy: per-block reconstruction MSE (quantized vs full-precision
++        # block outputs on the calibration inputs). `outs` still holds this block's FP
++        # outputs from the Hessian forward; capture them, then the re-forward below fills
++        # `outs` with the quantized (bias-corrected when alpha!=0) outputs. Read-only w.r.t.
++        # weights, so it never perturbs the degenerate alpha=0 == vanilla GPTQ path.
++        fp_ref = outs.clone()
          for j in range(args.nsamples):
              outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask)[0]
++        print('LAYER_MSE', i, ((outs - fp_ref) ** 2).float().mean().item())
  
-@@ -432,6 +468,10 @@ if __name__ == '__main__':
+         layers[i] = layer.cpu()
+         del layer
+@@ -432,6 +475,10 @@ if __name__ == '__main__':
          '--static-groups', action='store_true',
          help='Whether to use static groups; recommended when using `--actorder` for more efficient inference.'
      )

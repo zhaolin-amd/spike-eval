@@ -66,6 +66,20 @@ def parse_ppl(stdout: str, dataset: str = EVAL_DATASET) -> Optional[float]:
     return None
 
 
+def parse_layer_mse(stdout: str) -> Optional[float]:
+    """Mean of the per-block `LAYER_MSE <i> <value>` lines the patched opt.py prints during
+    quantization (the L1 proxy metric). None if no such line was seen."""
+    vals: list[float] = []
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "LAYER_MSE":
+            try:
+                vals.append(float(parts[2]))
+            except ValueError:
+                continue
+    return sum(vals) / len(vals) if vals else None
+
+
 # --- run cache -------------------------------------------------------------
 
 
@@ -75,14 +89,15 @@ def _cache_key(model: str, alpha: Optional[float]) -> str:
     return f"{m}_{a}"
 
 
-def _measure(rd: RunDir, model: str, alpha: Optional[float], *, timeout: float = 1800
-             ) -> Optional[float]:
+def _run_and_cache(rd: RunDir, model: str, alpha: Optional[float], *, timeout: float = 1800
+                   ) -> dict:
     """Run opt.py once for (model, alpha) with streaming early-termination after the
-    WikiText2 ppl is captured; cache the result. alpha=None -> pristine (no --bc-alpha)."""
+    WikiText2 ppl, parse BOTH the ppl (L2) and the mean layer MSE (L1) from the log, and
+    cache them. One run therefore serves every tier. alpha=None -> pristine (no flag)."""
     key = _cache_key(model, alpha)
     cache = rd.ladder_dir / f"{key}.json"
     if cache.exists():
-        return json.loads(cache.read_text()).get("ppl")
+        return json.loads(cache.read_text())
 
     resolved = modelpaths.resolve_model(model)
     visible = gpu.cuda_visible(1) or "0"
@@ -93,9 +108,16 @@ def _measure(rd: RunDir, model: str, alpha: Optional[float], *, timeout: float =
 
     log = rd.ladder_dir / f"{key}.log"
     ppl = _stream_run(cmd, rd.repo_dir, env, log, timeout=timeout)
-    cache.write_text(json.dumps({"model": model, "alpha": alpha, "ppl": ppl,
-                                 "cuda_visible": visible}))
-    return ppl
+    text = log.read_text() if log.exists() else ""
+    data = {"model": model, "alpha": alpha, "ppl": ppl,
+            "layer_mse": parse_layer_mse(text), "cuda_visible": visible}
+    cache.write_text(json.dumps(data))
+    return data
+
+
+def _metric_value(data: dict, metric: str) -> Optional[float]:
+    """Pick the tier's metric out of a cached run: 'perplexity' -> ppl, else layer MSE."""
+    return data.get("ppl") if metric == "perplexity" else data.get("layer_mse")
 
 
 def _stream_run(cmd: list[str], cwd: Path, env: dict, log: Path, *, timeout: float
@@ -152,7 +174,7 @@ def baseline_executor(rd: RunDir, baseline: Baseline, protocol: EvalProtocol,
                       model: str) -> Measurement:
     """Infra-sanity probe: pristine (unpatched) GPTQ on the cheapest tier's model. Runs
     BEFORE implement patches the repo (pipeline order), so no --bc-alpha flag exists yet."""
-    ppl = _measure(rd, model, alpha=None)
+    ppl = _run_and_cache(rd, model, alpha=None).get("ppl")
     return Measurement(tier="L2_tiny", variant="baseline", metric="perplexity",
                        value=ppl, ok=ppl is not None,
                        log_path=str(rd.ladder_dir / f"{_cache_key(model, None)}.log"))
@@ -182,8 +204,8 @@ def check_runner(rd: RunDir, check: CorrectnessCheck) -> CheckResult:
                            detail="unsupported check kind for gptq_opt")
     spec = rd.read_spec()
     model = spec.ladder[0].model if (spec and spec.ladder) else "facebook/opt-125m"
-    pristine = _measure(rd, model, alpha=None)
-    deg = _measure(rd, model, alpha=0.0)
+    pristine = _run_and_cache(rd, model, alpha=None).get("ppl")
+    deg = _run_and_cache(rd, model, alpha=0.0).get("ppl")
     if pristine is None or deg is None:
         return CheckResult(kind=check.kind, passed=False, detail="a run produced no ppl")
     ok = abs(pristine - deg) <= DEGENERATE_EPS
@@ -194,11 +216,14 @@ def check_runner(rd: RunDir, check: CorrectnessCheck) -> CheckResult:
 
 def tier_executor(rd: RunDir, tier: LadderTier, variant: str) -> Measurement:
     """Ladder measurement: baseline variant -> alpha 0 (== pristine by the degenerate
-    gate); idea variant -> alpha DEMO_ALPHA."""
+    gate); idea variant -> alpha DEMO_ALPHA. The tier's own metric selects L1 layer-MSE vs
+    L2 perplexity from the single cached run."""
     alpha = 0.0 if variant == "baseline" else DEMO_ALPHA
-    ppl = _measure(rd, tier.model, alpha=alpha)
-    return Measurement(tier=tier.name, variant=variant, metric="perplexity",
-                       value=ppl, ok=ppl is not None,
+    data = _run_and_cache(rd, tier.model, alpha=alpha)
+    metric = tier.protocol.metric
+    value = _metric_value(data, metric)
+    return Measurement(tier=tier.name, variant=variant, metric=metric,
+                       value=value, ok=value is not None,
                        log_path=str(rd.ladder_dir / f"{_cache_key(tier.model, alpha)}.log"))
 
 

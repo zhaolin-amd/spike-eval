@@ -27,6 +27,7 @@ Quantizing ...
 time 0.53
 error 38.450645446777344
 BC applied layer 0 alpha 1.0
+LAYER_MSE 0 6.671705341432244e-05
 1 self_attn.k_proj
 Quantizing ...
 time 0.16
@@ -52,6 +53,7 @@ Quantizing ...
 time 0.53
 error 31.20859718322754
 BC applied layer 1 alpha 1.0
+LAYER_MSE 1 4.4369284296408296e-05
 2 self_attn.k_proj
 Quantizing ...
 time 0.15
@@ -77,6 +79,7 @@ Quantizing ...
 time 0.53
 error 28.384859085083008
 BC applied layer 2 alpha 1.0
+LAYER_MSE 2 9.458796557737514e-05
 3 self_attn.k_proj
 Quantizing ...
 time 0.16
@@ -102,9 +105,10 @@ Quantizing ...
 time 0.53
 error 20.698604583740234
 BC applied layer 3 alpha 1.0
+LAYER_MSE 3 5.462166154757142e-05
 4 self_attn.k_proj
 Quantizing ...
-time 0.16
+time 0.15
 error 12813.66796875
 4 self_attn.v_proj
 Quantizing ...
@@ -127,6 +131,7 @@ Quantizing ...
 time 0.53
 error 51.862327575683594
 BC applied layer 4 alpha 1.0
+LAYER_MSE 4 9.596286690793931e-05
 5 self_attn.k_proj
 Quantizing ...
 time 0.16
@@ -152,9 +157,10 @@ Quantizing ...
 time 0.53
 error 97.5029296875
 BC applied layer 5 alpha 1.0
+LAYER_MSE 5 0.00013806232891511172
 6 self_attn.k_proj
 Quantizing ...
-time 0.16
+time 0.15
 error 15446.935546875
 6 self_attn.v_proj
 Quantizing ...
@@ -177,9 +183,10 @@ Quantizing ...
 time 0.53
 error 128.94325256347656
 BC applied layer 6 alpha 1.0
+LAYER_MSE 6 0.00018468149937689304
 7 self_attn.k_proj
 Quantizing ...
-time 0.16
+time 0.15
 error 16897.763671875
 7 self_attn.v_proj
 Quantizing ...
@@ -202,9 +209,10 @@ Quantizing ...
 time 0.53
 error 158.4791717529297
 BC applied layer 7 alpha 1.0
+LAYER_MSE 7 0.00029086944414302707
 8 self_attn.k_proj
 Quantizing ...
-time 0.16
+time 0.15
 error 17442.0234375
 8 self_attn.v_proj
 Quantizing ...
@@ -227,6 +235,7 @@ Quantizing ...
 time 0.53
 error 254.677734375
 BC applied layer 8 alpha 1.0
+LAYER_MSE 8 0.0003592153952922672
 9 self_attn.k_proj
 Quantizing ...
 time 0.16
@@ -252,9 +261,10 @@ Quantizing ...
 time 0.53
 error 317.23480224609375
 BC applied layer 9 alpha 1.0
+LAYER_MSE 9 0.0005486211739480495
 10 self_attn.k_proj
 Quantizing ...
-time 0.16
+time 0.15
 error 21572.7890625
 10 self_attn.v_proj
 Quantizing ...
@@ -277,9 +287,10 @@ Quantizing ...
 time 0.53
 error 533.65380859375
 BC applied layer 10 alpha 1.0
+LAYER_MSE 10 0.000788626610301435
 11 self_attn.k_proj
 Quantizing ...
-time 0.16
+time 0.15
 error 18622.66015625
 11 self_attn.v_proj
 Quantizing ...
@@ -302,7 +313,8 @@ Quantizing ...
 time 0.53
 error 830.45556640625
 BC applied layer 11 alpha 1.0
-19.557358264923096
+LAYER_MSE 11 0.001450131880119443
+19.5381920337677
 wikitext2
 Evaluating ...
 0
