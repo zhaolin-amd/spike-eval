@@ -57,8 +57,9 @@ def _blocked(spec: IdeaSpec, reason: str) -> Grade:
 
 def _finish_with_grade(rd: RunDir, spec: IdeaSpec, grade: Grade) -> PipelineResult:
     rd.write_grade(grade)
-    analysis, en, zh = render_reports(spec, grade)
-    (rd.root / "analysis.md").write_text(analysis)
+    analysis_en, analysis_zh, en, zh = render_reports(spec, grade)
+    (rd.root / "analysis_en.md").write_text(analysis_en)
+    (rd.root / "analysis_zh.md").write_text(analysis_zh)
     (rd.root / "README.md").write_text(en)
     (rd.root / "README_zh.md").write_text(zh)
     return PipelineResult(root=rd.root, aborted_at=None, grade=grade)

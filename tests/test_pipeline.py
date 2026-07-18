@@ -62,7 +62,8 @@ def test_pipeline_win(tmp_path):
     assert res.grade.verdict == "WIN"
     assert (res.root / "README.md").exists()
     assert (res.root / "README_zh.md").exists()
-    assert (res.root / "analysis.md").exists()
+    assert (res.root / "analysis_en.md").exists()
+    assert (res.root / "analysis_zh.md").exists()
     assert (res.root / "idea_spec.yaml").exists()
     assert (res.root / "ingest.json").exists()
     # run dir slug derives from the idea text, not a placeholder

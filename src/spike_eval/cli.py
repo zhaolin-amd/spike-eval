@@ -94,8 +94,9 @@ def report(run_dir: str) -> None:
     if spec is None or grade is None:
         click.echo("run dir has no spec/grade yet", err=True)
         sys.exit(1)
-    analysis, en, zh = render_reports(spec, grade)
-    (rd.root / "analysis.md").write_text(analysis)
+    analysis_en, analysis_zh, en, zh = render_reports(spec, grade)
+    (rd.root / "analysis_en.md").write_text(analysis_en)
+    (rd.root / "analysis_zh.md").write_text(analysis_zh)
     (rd.root / "README.md").write_text(en)
     (rd.root / "README_zh.md").write_text(zh)
     click.echo(f"re-rendered reports in {rd.root}")

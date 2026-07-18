@@ -94,8 +94,8 @@ into `README.md` / `README_zh.md` respectively. Do NOT create one bilingual `ana
   drifts. Keep analysis concise and non-redundant with the auto-generated verdict.
 - **Structure:** root-cause (a table comparing baseline vs idea setup) → evidence → why
   other metrics are unaffected → fix direction.
-- **Status here:** current `report.py` emits a single English `analysis.md`; migrating to
-  the `_en`/`_zh` split is the intended convention — follow it when extending reports.
+- **How here:** `report.render_reports` emits `analysis_en.md` + `analysis_zh.md` (plus
+  `README.md` / `README_zh.md`); keep them one-language-per-file when extending reports.
 
 ### 9. Add an algorithm-overview diagram to the report
 For a non-trivial idea, add a diagram so a reader grasps *how* the method works without
