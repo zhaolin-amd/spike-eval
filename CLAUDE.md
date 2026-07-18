@@ -41,11 +41,23 @@ set, eval tasks/dataset, few-shot, target ± tolerance, and hardware.
   per-option quant config, calibration, eval protocol and target — mirror the IdeaSpec's
   `claim.protocol` + ladder tiers, not just a name.
 
+### 4. Validate the cheapest core-mechanism target first — not the heavy headline claim
+When deciding *what* to validate, aim the claim at the cheapest signal that can falsify the
+idea (a proxy metric / small model / the core mechanism), not the heaviest headline number;
+then surface the chosen scope (model × config × cost) to the user.
+- **Why:** an idea/paper usually points at a heavy headline metric, but a cheap core-
+  validation kills a wrong idea far sooner and cheaper. (Origin: TurboQuant specextract
+  emitted the heavy KV-cache LongBench claims; the faithful cheap target was §4.1 distortion
+  rates.)
+- **How here:** the cost ladder puts the cheapest falsifying tier first (L1 proxy / tiny
+  model); author the `claim` around the core mechanism, and surface the scope at gate 1/2
+  rather than defaulting to the biggest number.
+
 ---
 
 ## Quality gates (never skip on "looks fine")
 
-### 4. Self-review / correctness is a HARD gate — green tests + green lint do not substitute
+### 5. Self-review / correctness is a HARD gate — green tests + green lint do not substitute
 Tests passing and lint clean is necessary, not sufficient. Run the explicit review/check
 step before committing.
 - **Why:** "looks fine" is exactly when real issues slip through. (Origin: an
@@ -55,7 +67,7 @@ step before committing.
   that declares **zero** correctness checks does NOT clear it (→ BLOCKED). Correct order:
   tests green → lint green → self-review → fix findings → commit → push.
 
-### 5. Cross-check the algorithm against an INDEPENDENT closed form, in unit tests
+### 6. Cross-check the algorithm against an INDEPENDENT closed form, in unit tests
 Do not only check the measured metric against a target — that is circular. Find a
 textbook/closed-form result the algorithm must also satisfy and assert it.
 - **Why:** a wrong impl can "match" a number by luck but cannot satisfy an independent
@@ -65,7 +77,19 @@ textbook/closed-form result the algorithm must also satisfy and assert it.
   bit-exact) and/or a `closed_form_ref`. Validate the independent result first, the target
   second.
 
-### 6. When a number is off, diagnose the eval infrastructure BEFORE blaming the idea
+### 7. The source of truth is the idea's paper/spec — not an upstream/reference repo
+When an idea comes from a paper (arxiv input) that builds on a prior method with its own
+repo, implement the method as the **paper/spec** defines it, even if an upstream/reference
+repo uses a different convention. Reference repos are read-only aids, never the authority,
+and never a back door to the target number.
+- **Why:** an upstream repo can diverge from the paper's stated definition; the paper is
+  what's being validated. (Origin: TurboQuant builds on QJL — implement the paper's restated
+  definition, not QJL's convention.)
+- **How here:** the arxiv ingest path takes only the *method*; `idea_spec.public.yaml` is a
+  redacted view so the implementer can't read the target band; keep any upstream repo as a
+  read-only reference alongside the spec.
+
+### 8. When a number is off, diagnose the eval infrastructure BEFORE blaming the idea
 A moved metric is only trustworthy once the baseline itself is sane.
 - **Why:** the gap is often the harness, not the algorithm. (Origin: MXFP4 acc_norm was
   off because a pre-instantiated HF model was passed to lm-eval instead of a path; the
@@ -80,14 +104,14 @@ A moved metric is only trustworthy once the baseline itself is sane.
 
 ## Reporting
 
-### 7. Order a toolchain hardware→software / produce→evaluate
+### 9. Order a toolchain hardware→software / produce→evaluate
 List environment components top-down along the stack: **CUDA/ROCm → torch → transformers
 → lm_eval** (accelerator runtime → framework → library → eval harness).
 - **Why:** it mirrors how the stack is built and how a run flows (quantize → evaluate), so
   it reads naturally — not alphabetical or arbitrary.
 - **How here:** any Environment line in a report (`report.py`) uses this order.
 
-### 8. Write analysis in separate `analysis_en.md` / `analysis_zh.md`, one language each
+### 10. Write analysis in separate `analysis_en.md` / `analysis_zh.md`, one language each
 English gap analysis in `analysis_en.md`, Chinese in `analysis_zh.md`; each is embedded
 into `README.md` / `README_zh.md` respectively. Do NOT create one bilingual `analysis.md`.
 - **Why:** the report renderer pulls the matching language; a mixed file duplicates and
@@ -97,7 +121,7 @@ into `README.md` / `README_zh.md` respectively. Do NOT create one bilingual `ana
 - **How here:** `report.render_reports` emits `analysis_en.md` + `analysis_zh.md` (plus
   `README.md` / `README_zh.md`); keep them one-language-per-file when extending reports.
 
-### 9. Add an algorithm-overview diagram to the report
+### 11. Add an algorithm-overview diagram to the report
 For a non-trivial idea, add a diagram so a reader grasps *how* the method works without
 reading the code (the results table shows *what*, the diagram shows *how/why*).
 - **How:** generate with a **committed** script under `figures/` (e.g.
