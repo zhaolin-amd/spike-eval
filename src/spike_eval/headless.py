@@ -33,6 +33,14 @@ def _call_claude(prompt: str, allowed_tools: list[str], cwd: Path,
     return proc.returncode
 
 
+def call_claude(prompt: str, allowed_tools: list[str], cwd: Path,
+                timeout: float | None = None) -> int:
+    """Public: invoke `claude -p` headless (prompt via stdin), return the exit code.
+    Success of a *side effect* (a file written, a diff produced) should be verified by the
+    caller, not inferred from this code (the CLI can exit 0 while doing nothing useful)."""
+    return _call_claude(prompt, allowed_tools, cwd, timeout=timeout)
+
+
 def run_headless(prompt: str, allowed_tools: list[str], cwd: Path,
                  expect_file: Path, timeout: float | None = None) -> HeadlessResult:
     code = _call_claude(prompt, allowed_tools, cwd, timeout=timeout)

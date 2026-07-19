@@ -23,6 +23,7 @@ from typing import Optional
 
 from spike_eval import gpu, modelpaths
 from spike_eval.correctness import CheckResult
+from spike_eval.headless import call_claude
 from spike_eval.implement import ImplementResult
 from spike_eval.models import (
     Baseline, CorrectnessCheck, EvalProtocol, IdeaSpec, LadderTier, Measurement,
@@ -39,6 +40,7 @@ CALIB = os.environ.get("SPIKE_EVAL_GPTQ_CALIB", "wikitext2")
 INTERP = os.environ.get("SPIKE_EVAL_PYTHON", sys.executable)
 EVAL_DATASET = "wikitext2"
 DEGENERATE_EPS = 1e-3          # alpha=0 must reproduce pristine ppl to within this
+IMPLEMENT_TIMEOUT = float(os.environ.get("SPIKE_EVAL_IMPLEMENT_TIMEOUT", "1800"))
 
 _DATASET_MARKERS = {"wikitext2", "ptb", "c4", "ptb-new", "c4-new"}
 
@@ -196,6 +198,59 @@ def implementer(rd: RunDir, spec: IdeaSpec) -> ImplementResult:
                            notes="bias-correction (--bc-alpha) grafted into opt_sequential")
 
 
+def _implement_prompt(spec: IdeaSpec) -> str:
+    """Prompt for the headless implementer. Pins the CLI contract the harness depends on
+    (`--bc-alpha`, alpha=0 == vanilla GPTQ) while leaving the implementation autonomous."""
+    ep = spec.extension_point
+    return f"""You are implementing a new-algorithm idea directly in this cloned GitHub repo
+(IST-DASLab/gptq, the original GPTQ code) at the current working directory. Make a small,
+surgical edit — do not refactor unrelated code.
+
+Idea to implement: {spec.summary}
+
+Target file/location: `{ep.file}`, function `{ep.symbol}` ({ep.kind}).
+
+You MUST honor this exact interface contract (a test and the eval harness depend on it):
+1. Add a command-line argument `--bc-alpha` (type float, default 0.0) to {ep.file}.
+2. When `--bc-alpha` is 0.0 (the default), behavior MUST be byte-for-byte identical to
+   vanilla GPTQ: no extra work, no change to any weight or bias. This is checked by a
+   degenerate-equivalence test (alpha=0 must reproduce the pristine WikiText2 perplexity
+   exactly).
+3. When `--bc-alpha` > 0: after GPTQ finishes quantizing the Linear layers of a decoder
+   block (i.e. after the per-layer fasterquant calls in `{ep.symbol}`), apply bias
+   correction — for each quantized Linear that has a bias, measure its mean output error on
+   the calibration inputs (mean over calibration tokens of full-precision output minus
+   quantized output, per output channel) and add `bc_alpha * error` to that Linear's bias.
+
+Constraints:
+- Edit ONLY `{ep.file}`. Do not touch datasets, eval, or other files.
+- Keep the code runnable as-is (`python {ep.file} <model> wikitext2 --wbits 4`).
+- Do not add prints other than what already exists (plus optional short debug is fine).
+- Do not create new files. When done, stop.
+"""
+
+
+def headless_implementer(rd: RunDir, spec: IdeaSpec) -> ImplementResult:
+    """Let headless Claude (`claude -p`) implement the idea as a surgical edit to the cloned
+    repo, then verify a real diff was produced. The correctness hard-gate (alpha=0 ==
+    pristine, bit-exact) is the safety net if the autonomous edit is wrong."""
+    prompt = _implement_prompt(spec)
+    (rd.impl_dir / "prompt.txt").write_text(prompt)
+    code = call_claude(prompt, allowed_tools=["Read", "Edit", "Grep", "Bash"],
+                       cwd=rd.repo_dir, timeout=IMPLEMENT_TIMEOUT)
+    diff = subprocess.run(["git", "-C", str(rd.repo_dir), "diff"],
+                          capture_output=True, text=True).stdout
+    if not diff.strip():
+        return ImplementResult(ok=False,
+                               notes=f"headless produced no diff (claude exit={code})")
+    patch = rd.impl_dir / "idea.patch"
+    patch.write_text(diff)
+    files = subprocess.run(["git", "-C", str(rd.repo_dir), "diff", "--name-only"],
+                           capture_output=True, text=True).stdout.split()
+    return ImplementResult(ok=True, patch_path=str(patch), files_touched=files,
+                           notes=f"headless Claude implemented the idea (exit={code})")
+
+
 def check_runner(rd: RunDir, check: CorrectnessCheck) -> CheckResult:
     """Degenerate-equivalence: patched repo with --bc-alpha 0 must reproduce the pristine
     WikiText2 ppl to within DEGENERATE_EPS. Other check kinds are not implemented here."""
@@ -227,13 +282,17 @@ def tier_executor(rd: RunDir, tier: LadderTier, variant: str) -> Measurement:
                        log_path=str(rd.ladder_dir / f"{_cache_key(tier.model, alpha)}.log"))
 
 
-def make_executors() -> Executors:
+def make_executors(implement: str = "patch") -> Executors:
     """Executors wired for the gptq-opt family. `fetch` uses the default git clone; the
     idea-spec is expected to already be on disk (hand-authored for the demo), so no
-    spec_extractor is wired."""
+    spec_extractor is wired. `implement`: 'patch' applies the hand-written diff (derisked
+    default); 'headless' lets `claude -p` write the diff autonomously."""
+    if implement not in ("patch", "headless"):
+        raise ValueError(f"implement must be 'patch' or 'headless', got {implement!r}")
+    impl = headless_implementer if implement == "headless" else implementer
     return Executors(
         baseline=baseline_executor,
-        implementer=implementer,
+        implementer=impl,
         check_runner=check_runner,
         tier=tier_executor,
         ablation=None,

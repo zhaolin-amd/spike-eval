@@ -1,5 +1,9 @@
 """Offline tests for the gptq-opt executor's pure helpers (no GPU / no subprocess)."""
-from spike_eval.executors.gptq_opt import _cache_key, parse_layer_mse, parse_ppl
+from spike_eval.executors.gptq_opt import (
+    _cache_key, _implement_prompt, headless_implementer, implementer, make_executors,
+    parse_layer_mse, parse_ppl,
+)
+from spike_eval.models import Claim, EvalProtocol, IdeaSpec
 
 # Captured shape of IST-DASLab/gptq opt.py stdout: quantization time float appears BEFORE
 # the 'wikitext2' marker, then the eval section ends in the ppl float. LAYER_MSE lines are
@@ -57,3 +61,33 @@ def test_cache_key_distinguishes_alpha():
     assert _cache_key(m, None).endswith("pristine")
     assert _cache_key(m, 0.0) != _cache_key(m, 1.0)
     assert "a0.0" in _cache_key(m, 0.0)
+
+
+def _spec():
+    return IdeaSpec(
+        idea_name="X", target_repo="https://github.com/IST-DASLab/gptq",
+        summary="fold alpha * mean output error into bias",
+        extension_point={"file": "opt.py", "symbol": "opt_sequential", "kind": "hook"},
+        baseline={"method": "GPTQ", "command": "c"},
+        claim=Claim(id="c1", statement="s",
+                    protocol=EvalProtocol(command="e", metric="perplexity"),
+                    min_delta=0.05),
+    )
+
+
+def test_implement_prompt_pins_contract():
+    p = _implement_prompt(_spec())
+    assert "--bc-alpha" in p
+    assert "opt.py" in p and "opt_sequential" in p
+    assert "byte-for-byte identical" in p  # the degenerate guarantee
+
+
+def test_make_executors_selects_implementer():
+    assert make_executors("patch").implementer is implementer
+    assert make_executors("headless").implementer is headless_implementer
+
+
+def test_make_executors_rejects_bad_implement():
+    import pytest
+    with pytest.raises(ValueError):
+        make_executors("nope")

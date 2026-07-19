@@ -9,6 +9,7 @@ spike_eval, and point SPIKE_EVAL_PYTHON at one that can run the GPTQ repo (torch
 """
 from __future__ import annotations
 
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -16,21 +17,29 @@ from spike_eval.executors.gptq_opt import GITHUB_URL, make_executors
 from spike_eval.pipeline import run_pipeline
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SPEC = REPO_ROOT / "examples" / "gptq-bias-correction" / "idea_spec.yaml"
+EX_DIR = REPO_ROOT / "examples" / "gptq-bias-correction"
 IDEA = ("GPTQ bias-correction: after quantizing each OPT block, fold alpha * mean output "
         "error into each Linear's bias; alpha=0 == vanilla GPTQ.")
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--implement", choices=["patch", "headless"], default="patch",
+                    help="apply the hand-written patch, or let headless Claude write it")
+    args = ap.parse_args()
+    # headless implements only the idea (no LAYER_MSE), so use the L2-only spec for it.
+    spec = EX_DIR / ("idea_spec_headless.yaml" if args.implement == "headless"
+                     else "idea_spec.yaml")
+
     base = REPO_ROOT / "runs"
     base.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     res = run_pipeline(
         GITHUB_URL, IDEA, base, ts,
-        ex=make_executors(),
+        ex=make_executors(implement=args.implement),
         approve_spec=lambda spec: True,
         approve_plan=lambda plan: True,
-        spec_path=SPEC,
+        spec_path=spec,
     )
     print("\n===== SpikeEval GPTQ demo =====")
     if res.aborted_at:
