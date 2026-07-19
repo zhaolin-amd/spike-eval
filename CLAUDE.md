@@ -136,6 +136,22 @@ reading the code (the results table shows *what*, the diagram shows *how/why*).
 
 ---
 
+## Git workflow
+
+### 12. Pull before you push
+**Always `git pull` (fast-forward, or `--rebase` if you have local commits) before
+`git push`** — never push straight from a local checkout that hasn't just synced with
+`origin/main`.
+- **Why:** caught in practice on a sibling repo (paper-reprise) — a session committed and
+  nearly pushed on a base 24 commits behind `origin/main`. Multiple sessions/agents can work
+  in these repos, so a checkout goes stale between when you started and when you're ready
+  to push.
+- **How here:** before any `git push`, run `git fetch` + check `git log HEAD..origin/main`;
+  if behind, pull first (fast-forward when there are no local commits yet, `--rebase` when
+  there are). Applies mid-session too, not just at session start.
+
+---
+
 ## Environment (this node)
 
 - Pretrained models: read-first from `/group/amdneuralopt/huggingface/pretrained_models`
