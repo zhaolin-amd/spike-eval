@@ -1,0 +1,26 @@
+{
+  "idea": "MXFP4-MBS-H-ACTW (amax^2-weighted MBS-Dynamic weight search)",
+  "baseline_method": "MXFP4-MBS-H",
+  "model": "Qwen/Qwen3-8B",
+  "metric": "wikitext word_perplexity",
+  "lower_is_better": true,
+  "calib": {
+    "dataset": "pileval",
+    "num_calib_data": 1,
+    "seqlen": 512
+  },
+  "L1_proxy": {
+    "nmse_base": 0.002331433,
+    "nmse_idea": 0.001510355,
+    "rel_improvement_pct": 35.218,
+    "layers_improved": "252/252"
+  },
+  "L2": {
+    "baseline_ppl": 13.0535,
+    "idea_ppl": 13.0155,
+    "delta_ppl": 0.038,
+    "reference_paper_reprise_ppl": 13.05
+  },
+  "min_delta": 0.05,
+  "verdict": "NEUTRAL"
+}

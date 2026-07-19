@@ -1,0 +1,72 @@
+idea_name: "Activation-aware (amax^2-weighted) MBS-Dynamic search"
+target_repo: "paper-reprise/runs/OAS-MBS-2603.08713-20260709-150131 (impl/)"
+summary: >
+  The paper's MBS-Dynamic chooses each 1x128 macro-block weight-refinement factor by
+  searching the mantissa slot that minimizes the *unweighted* macro-block SSE
+  sum_k (deq_k - w_k)^2. This idea keeps the same search but minimizes an input-amax^2-
+  weighted SSE  sum_k a_k^2 (deq_k - w_k)^2,  where a_k is the amax of input-channel k from
+  calibration (pileval, num_calib_data=1). Motivation: output error ~ dW . x, so weight
+  columns feeding large activations should dominate the objective (AWQ-flavored MBS). The
+  activation path is unchanged (still static MBS). a_k=const reduces exactly to the paper's
+  search (bit-exact).
+wins_on: accuracy
+
+extension_point:
+  file: impl/mxquant.py
+  symbol: _mbs_factor_dynamic
+  kind: hook
+  description: >
+    Add an optional per-position weight chan_w to the dynamic search objective; thread it
+    through fake_quant and QuantLinear as amax^2. New method MXFP4-MBS-H-ACTW. Zero blast
+    radius: chan_w=None is the pristine paper path.
+
+baseline:
+  method: MXFP4-MBS-H
+  command: "python eval_one.py qwen3-8b-mxfp4-mbs-h-ppl"
+  sane_low: 12.0
+  sane_high: 16.0
+
+claim:
+  id: mbs-actw-qwen3-8b-mxfp4-wikitext
+  statement: >
+    On Qwen/Qwen3-8B at MXFP4 (OAS inner block 16, 1x128 MBS macro block, dynamic weight /
+    static activation), replacing the plain-SSE weight search with an input-amax^2-weighted
+    SSE search lowers wikitext word_perplexity vs the paper's MBS-H by at least min_delta.
+  protocol:
+    command: "python eval_one.py qwen3-8b-mxfp4-mbs-h-actw-ppl"
+    metric: word_perplexity
+    lower_is_better: true
+    dataset: wikitext
+    calib: {dataset: pileval, num_calib_data: 1, seqlen: 512}
+  min_delta: 0.05
+  tolerance: 0.02
+
+correctness:
+  - kind: degenerate_equivalence
+    description: "uniform chan_w must reproduce MBS-H bit-exactly (weight is a 1.0 multiplier)."
+    degenerate_params: {chan_w: uniform}
+  - kind: closed_form
+    description: "selected slot == brute-force argmin of sum_k a_k^2 (deq_k - w_k)^2."
+
+ladder:
+  - name: L1_output_mse_proxy
+    model: Qwen/Qwen3-8B
+    protocol:
+      command: "python l1_proxy.py"
+      metric: layer_output_nmse
+      lower_is_better: true
+      dataset: pileval-1sample
+    budget_gpu_hours: 0.02
+    est_cost_usd: 0.0
+    pass_margin: 0.0
+  - name: L2_wikitext_ppl
+    model: Qwen/Qwen3-8B
+    protocol:
+      command: "python eval_one.py qwen3-8b-mxfp4-mbs-h-actw-ppl"
+      metric: word_perplexity
+      lower_is_better: true
+      dataset: wikitext
+    budget_gpu_hours: 0.05
+    est_cost_usd: 0.0
+
+ablations: []
