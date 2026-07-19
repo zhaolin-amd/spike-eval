@@ -102,17 +102,19 @@ def _run_and_cache(rd: RunDir, model: str, alpha: Optional[float], *, timeout: f
         return json.loads(cache.read_text())
 
     resolved = modelpaths.resolve_model(model)
-    visible = gpu.cuda_visible(1) or "0"
+    env_var, visible = gpu.visible_devices(1)
+    if not visible:
+        visible = "0"   # last-resort fallback; will fail loudly if no GPU present
     cmd = [INTERP, "opt.py", resolved, CALIB, "--wbits", str(WBITS)]
     if alpha is not None:
         cmd += ["--bc-alpha", str(alpha)]
-    env = {**os.environ, "CUDA_VISIBLE_DEVICES": visible, **modelpaths.hf_env_overlay()}
+    env = {**os.environ, env_var: visible, **modelpaths.hf_env_overlay()}
 
     log = rd.ladder_dir / f"{key}.log"
     ppl = _stream_run(cmd, rd.repo_dir, env, log, timeout=timeout)
     text = log.read_text() if log.exists() else ""
     data = {"model": model, "alpha": alpha, "ppl": ppl,
-            "layer_mse": parse_layer_mse(text), "cuda_visible": visible}
+            "layer_mse": parse_layer_mse(text), env_var: visible}
     cache.write_text(json.dumps(data))
     return data
 
@@ -176,8 +178,9 @@ def baseline_executor(rd: RunDir, baseline: Baseline, protocol: EvalProtocol,
                       model: str) -> Measurement:
     """Infra-sanity probe: pristine (unpatched) GPTQ on the cheapest tier's model. Runs
     BEFORE implement patches the repo (pipeline order), so no --bc-alpha flag exists yet."""
-    ppl = _run_and_cache(rd, model, alpha=None).get("ppl")
-    return Measurement(tier="L2_tiny", variant="baseline", metric="perplexity",
+    data = _run_and_cache(rd, model, alpha=None)
+    ppl = data.get("ppl")
+    return Measurement(tier="probe", variant="baseline", metric="perplexity",
                        value=ppl, ok=ppl is not None,
                        log_path=str(rd.ladder_dir / f"{_cache_key(model, None)}.log"))
 

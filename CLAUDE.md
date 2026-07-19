@@ -152,12 +152,27 @@ reading the code (the results table shows *what*, the diagram shows *how/why*).
 
 ---
 
+### 13. Detect AMD GPUs (rocm-smi) when NVIDIA (nvidia-smi) is absent — never assume NVIDIA-only
+Before spawning any GPU subprocess, probe `nvidia-smi` first; if unavailable or returns no
+free GPUs, fall back to `rocm-smi`. Set the appropriate env var for whichever vendor is
+found (`CUDA_VISIBLE_DEVICES` for NVIDIA, `HIP_VISIBLE_DEVICES` for AMD). Never hard-code
+`CUDA_VISIBLE_DEVICES` unconditionally — it silently does nothing on ROCm nodes.
+- **Why:** nodes can be NVIDIA or AMD (this project targets AMD H200/MI300 hardware).
+  Hard-coding NVIDIA detection means the tool breaks silently on AMD nodes: the env var is
+  ignored, the job runs on whatever GPU the runtime picks (or fails). Detected in practice
+  when a headless session migrated to a CPU-only node and `nvidia-smi` was absent.
+- **How here:** `gpu.py` → `pick_gpus()` tries nvidia-smi first then rocm-smi; returns a
+  `GpuInfo(vendor, env_var, indices)` so callers always set the right env var.
+  `gptq_opt._run_and_cache` uses `gpu.visible_devices()` which returns `(env_var_name, value)`.
+
+---
+
 ## Environment (this node)
 
 - Pretrained models: read-first from `/group/amdneuralopt/huggingface/pretrained_models`
   (`<org>/<model>` snapshot layout); downloads go to `/scratch/$USER/pretrained_models`
   (never `$HOME`, small quota). Encoded in `modelpaths.py` (env `SPIKE_EVAL_MODEL_BASE` /
   `SPIKE_EVAL_DOWNLOAD_DIR`).
-- H200 × 8 node; pick free GPUs via `gpu.py`. The GPTQ repo runs under the
-  `quark_cuda` conda interpreter (torch 2.9 + transformers 4.57); point
-  `SPIKE_EVAL_PYTHON` at it while driving the pipeline from the project venv.
+- H200 × 8 node; pick free GPUs via `gpu.py` (nvidia-smi → rocm-smi fallback).
+  The GPTQ repo runs under the `quark_cuda` conda interpreter (torch 2.9 + transformers
+  4.57); point `SPIKE_EVAL_PYTHON` at it while driving the pipeline from the project venv.
