@@ -97,7 +97,6 @@ def run_pipeline(
     if not approve_spec(spec):
         return PipelineResult(root=rd.root, aborted_at="spec-approval")
     rd.write_spec(spec)
-    rd.write_public_spec(spec)
 
     return _finish_pipeline(rd, spec, ex=ex, approve_plan=approve_plan)
 

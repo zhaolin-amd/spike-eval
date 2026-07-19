@@ -24,20 +24,6 @@ def slug(text: str, max_len: int = 40) -> str:
     return s[:max_len].strip("-") or "idea"
 
 
-def public_spec_dict(spec: IdeaSpec) -> dict:
-    """Redacted view for the implementer: drop the claim's numeric target band so the
-    agent cannot read what it is graded against. Method / extension point / protocol
-    are preserved (they are what must be implemented). Pure dict transform."""
-    d = spec.model_dump()
-    claim = d.get("claim") or {}
-    for k in ("min_delta", "tolerance"):
-        claim.pop(k, None)
-    base = d.get("baseline") or {}
-    for k in ("sane_low", "sane_high"):
-        base.pop(k, None)
-    return d
-
-
 class RunDir:
     """Typed I/O over one run directory. Directory creation is eager; artifact writes
     are per-stage."""
@@ -106,12 +92,6 @@ class RunDir:
     def write_spec(self, spec: IdeaSpec) -> None:
         (self.root / "idea_spec.yaml").write_text(
             yaml.safe_dump(spec.model_dump(), sort_keys=False, allow_unicode=True))
-
-    def write_public_spec(self, spec: IdeaSpec) -> Path:
-        p = self.root / "idea_spec.public.yaml"
-        p.write_text(yaml.safe_dump(public_spec_dict(spec), sort_keys=False,
-                                    allow_unicode=True))
-        return p
 
     def read_spec(self) -> Optional[IdeaSpec]:
         p = self.root / "idea_spec.yaml"

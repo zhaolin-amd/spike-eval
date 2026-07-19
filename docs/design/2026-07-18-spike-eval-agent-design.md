@@ -102,8 +102,7 @@ pipeline is testable offline with fakes (as in paper-reprise).
 ```
 ingest.json            input metadata (repo source, idea kind)
 idea.md                the raw idea text / fetched source            [tracked]
-idea_spec.yaml         extracted IdeaSpec                            [tracked]
-idea_spec.public.yaml  redacted view for the implementer (no target numbers)
+idea_spec.yaml         extracted IdeaSpec (single private spec)      [tracked]
 plan.json              cost-ladder plan + surfaced scale             [tracked]
 repo/                  cloned/copied target repo                     [gitignored]
 env/                   dedicated venv                                [gitignored]

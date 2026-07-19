@@ -85,9 +85,8 @@ and never a back door to the target number.
 - **Why:** an upstream repo can diverge from the paper's stated definition; the paper is
   what's being validated. (Origin: TurboQuant builds on QJL — implement the paper's restated
   definition, not QJL's convention.)
-- **How here:** the arxiv ingest path takes only the *method*; `idea_spec.public.yaml` is a
-  redacted view so the implementer can't read the target band; keep any upstream repo as a
-  read-only reference alongside the spec.
+- **How here:** the arxiv ingest path takes only the *method*; keep any upstream repo as a
+  read-only reference alongside the spec, never a back door to the target number.
 
 ### 8. When a number is off, diagnose the eval infrastructure BEFORE blaming the idea
 A moved metric is only trustworthy once the baseline itself is sane.
