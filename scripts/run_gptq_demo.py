@@ -17,7 +17,10 @@ from spike_eval.executors.gptq_opt import GITHUB_URL, make_executors
 from spike_eval.pipeline import run_pipeline
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-EX_DIR = REPO_ROOT / "examples" / "gptq-bias-correction"
+# Seed idea-specs live alongside the idea's run dir (there is no separate examples/ tree;
+# each idea's spec is a run-dir artifact). `idea_spec.seed*.yaml` are the hand-authored
+# inputs the demo re-runs the pipeline from; `idea_spec.yaml` is that run's snapshot.
+SEED_DIR = REPO_ROOT / "runs" / "gptq-bias-correction-gptq-20260719-030618"
 IDEA = ("GPTQ bias-correction: after quantizing each OPT block, fold alpha * mean output "
         "error into each Linear's bias; alpha=0 == vanilla GPTQ.")
 
@@ -28,8 +31,8 @@ def main() -> None:
                     help="apply the hand-written patch, or let headless Claude write it")
     args = ap.parse_args()
     # headless implements only the idea (no LAYER_MSE), so use the L2-only spec for it.
-    spec = EX_DIR / ("idea_spec_headless.yaml" if args.implement == "headless"
-                     else "idea_spec.yaml")
+    spec = SEED_DIR / ("idea_spec.seed-headless.yaml" if args.implement == "headless"
+                       else "idea_spec.seed.yaml")
 
     base = REPO_ROOT / "runs"
     base.mkdir(parents=True, exist_ok=True)
