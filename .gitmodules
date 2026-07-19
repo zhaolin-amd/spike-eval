@@ -1,0 +1,3 @@
+[submodule "runs"]
+	path = runs
+	url = https://github.com/zhaolin-amd/spike-eval-runs.git

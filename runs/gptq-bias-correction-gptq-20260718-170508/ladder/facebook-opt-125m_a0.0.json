@@ -1,1 +1,0 @@
-{"model": "facebook/opt-125m", "alpha": 0.0, "ppl": 30.537620544433594, "layer_mse": 0.00034973874608112965, "cuda_visible": "4"}
