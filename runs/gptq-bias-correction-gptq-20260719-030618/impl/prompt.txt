@@ -1,0 +1,26 @@
+You are implementing a new-algorithm idea directly in this cloned GitHub repo
+(IST-DASLab/gptq, the original GPTQ code) at the current working directory. Make a small,
+surgical edit — do not refactor unrelated code.
+
+Idea to implement: After GPTQ quantizes each OPT decoder block, measure each Linear's mean output error on the calibration inputs and fold alpha * error into its bias (a compensation term on top of GPTQ's existing Hessian error-feedback). Expose it as a --bc-alpha float arg (default 0.0); alpha=0 must reduce exactly to vanilla GPTQ.
+
+
+Target file/location: `opt.py`, function `opt_sequential` (hook).
+
+You MUST honor this exact interface contract (a test and the eval harness depend on it):
+1. Add a command-line argument `--bc-alpha` (type float, default 0.0) to opt.py.
+2. When `--bc-alpha` is 0.0 (the default), behavior MUST be byte-for-byte identical to
+   vanilla GPTQ: no extra work, no change to any weight or bias. This is checked by a
+   degenerate-equivalence test (alpha=0 must reproduce the pristine WikiText2 perplexity
+   exactly).
+3. When `--bc-alpha` > 0: after GPTQ finishes quantizing the Linear layers of a decoder
+   block (i.e. after the per-layer fasterquant calls in `opt_sequential`), apply bias
+   correction — for each quantized Linear that has a bias, measure its mean output error on
+   the calibration inputs (mean over calibration tokens of full-precision output minus
+   quantized output, per output channel) and add `bc_alpha * error` to that Linear's bias.
+
+Constraints:
+- Edit ONLY `opt.py`. Do not touch datasets, eval, or other files.
+- Keep the code runnable as-is (`python opt.py <model> wikitext2 --wbits 4`).
+- Do not add prints other than what already exists (plus optional short debug is fine).
+- Do not create new files. When done, stop.

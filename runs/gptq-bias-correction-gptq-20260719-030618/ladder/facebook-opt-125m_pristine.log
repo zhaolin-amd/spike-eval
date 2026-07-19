@@ -1,0 +1,40 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+CUDA extension not installed.
+
+Generating test split:   0%|          | 0/4358 [00:00<?, ? examples/s]
+Generating test split: 100%|██████████| 4358/4358 [00:00<00:00, 98205.41 examples/s]
+
+Generating train split:   0%|          | 0/36718 [00:00<?, ? examples/s]
+Generating train split: 100%|██████████| 36718/36718 [00:00<00:00, 1483784.59 examples/s]
+
+Generating validation split:   0%|          | 0/3760 [00:00<?, ? examples/s]
+Generating validation split: 100%|██████████| 3760/3760 [00:00<00:00, 1311810.27 examples/s]
+Starting ...
+Traceback (most recent call last):
+  File "/home/zhaolin/code/spike-eval/runs/gptq-bias-correction-gptq-20260719-030618/repo/opt.py", line 450, in <module>
+    quantizers = opt_sequential(model, dataloader, DEV)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zhaolin/code/spike-eval/runs/gptq-bias-correction-gptq-20260719-030618/repo/opt.py", line 31, in opt_sequential
+    model.model.decoder.embed_tokens = model.model.decoder.embed_tokens.to(dev) 
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1371, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/torch/nn/modules/module.py", line 957, in _apply
+    param_applied = fn(param)
+                    ^^^^^^^^^
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1357, in convert
+    return t.to(
+           ^^^^^
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/torch/cuda/__init__.py", line 410, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU and installed a driver from http://www.nvidia.com/Download/index.aspx
+Exception ignored in: <function ResourceTracker.__del__ at 0x7ffd7940a700>
+Traceback (most recent call last):
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/multiprocess/resource_tracker.py", line 80, in __del__
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/multiprocess/resource_tracker.py", line 89, in _stop
+  File "/home/zhaolin/miniconda3/envs/quark_cuda/lib/python3.12/site-packages/multiprocess/resource_tracker.py", line 102, in _stop_locked
+AttributeError: '_thread.RLock' object has no attribute '_recursion_count'

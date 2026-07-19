@@ -1,0 +1,1 @@
+GPTQ bias-correction: after quantizing each OPT block, fold alpha * mean output error into each Linear's bias; alpha=0 == vanilla GPTQ.

@@ -1,0 +1,13 @@
+{
+  "claim_id": "gptq-bc-headless-opt125m-w4-wikitext2",
+  "verdict": "BLOCKED",
+  "metric": "perplexity",
+  "lower_is_better": true,
+  "baseline_value": null,
+  "idea_value": null,
+  "delta": null,
+  "correctness_ok": false,
+  "infra_ok": false,
+  "deciding_tier": null,
+  "reason": "correctness gate failed — idea not equivalent/valid"
+}

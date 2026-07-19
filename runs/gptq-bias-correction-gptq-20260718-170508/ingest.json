@@ -1,0 +1,7 @@
+{
+  "repo_source": "https://github.com/IST-DASLab/gptq",
+  "repo_kind": "github",
+  "idea_kind": "text",
+  "idea_source": "GPTQ bias-correction: after quantizing each OPT block, fold alpha * mean output error into each Linear's bias; alpha=0 == vanilla GPTQ.",
+  "arxiv_id": null
+}

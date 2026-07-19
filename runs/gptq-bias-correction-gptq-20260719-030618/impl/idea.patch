@@ -1,0 +1,61 @@
+diff --git a/opt.py b/opt.py
+index ae26975..6807a48 100644
+--- a/opt.py
++++ b/opt.py
+@@ -86,9 +86,17 @@ def opt_sequential(model, dataloader, dev):
+                 args.wbits, perchannel=True, sym=args.sym, mse=False, trits=args.trits
+             )
+ 
++        if args.bc_alpha > 0.0:
++            inp_sums = {name: torch.zeros(subset[name].in_features, dtype=torch.float32, device=dev) for name in subset}
++            inp_counts = {name: 0 for name in subset}
++
+         def add_batch(name):
+             def tmp(_, inp, out):
+                 gptq[name].add_batch(inp[0].data, out.data)
++                if args.bc_alpha > 0.0:
++                    x = inp[0].data.float().reshape(-1, inp[0].data.shape[-1])
++                    inp_sums[name].add_(x.sum(0))
++                    inp_counts[name] += x.shape[0]
+             return tmp
+         handles = []
+         for name in subset:
+@@ -98,6 +106,9 @@ def opt_sequential(model, dataloader, dev):
+         for h in handles:
+             h.remove()
+ 
++        if args.bc_alpha > 0.0:
++            W_orig = {name: subset[name].weight.data.clone() for name in subset}
++
+         for name in subset:
+             print(i, name)
+             print('Quantizing ...')
+@@ -106,6 +117,17 @@ def opt_sequential(model, dataloader, dev):
+             )
+             quantizers['model.decoder.layers.%d.%s' % (i, name)] = gptq[name].quantizer
+             gptq[name].free()
++
++        if args.bc_alpha > 0.0:
++            for name in subset:
++                linear = subset[name]
++                if linear.bias is None:
++                    continue
++                mean_x = (inp_sums[name] / inp_counts[name]).to(linear.weight.dtype)
++                W_diff = (W_orig[name] - linear.weight.data).float()
++                error = W_diff @ mean_x.float()
++                linear.bias.data.add_((args.bc_alpha * error).to(linear.bias.dtype))
++
+         for j in range(args.nsamples):
+             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask)[0]
+ 
+@@ -432,6 +454,10 @@ if __name__ == '__main__':
+         '--static-groups', action='store_true',
+         help='Whether to use static groups; recommended when using `--actorder` for more efficient inference.'
+     )
++    parser.add_argument(
++        '--bc-alpha', type=float, default=0.0,
++        help='Bias correction strength; 0.0 (default) disables correction and reproduces vanilla GPTQ exactly.'
++    )
+ 
+     args = parser.parse_args()
+ 
